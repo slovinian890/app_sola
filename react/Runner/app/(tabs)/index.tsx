@@ -7,7 +7,10 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius, CleanPaceColors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import RunningMap from '@/components/running-map';
-import { getProfile, saveRun, Run } from '@/services/dataService';
+import { createRun, secondsToInterval, calculatePace } from '@/services/runsService';
+import { updateUserStatsAfterRun, checkAndAwardAchievements } from '@/services/statsService';
+import { getCurrentUser } from '@/services/authService';
+import { Run, RouteData } from '@/services/supabase';
 import PostRunModal from '@/components/post-run-modal';
 
 // Helper function to calculate distance between two coordinates (Haversine formula)
@@ -170,42 +173,69 @@ export default function HomeScreen() {
   const handleStopRun = async () => {
     setIsRunning(false);
     
-    if (duration === 0 || distance === 0) {
+    if (duration < 10 || distance < 0.01) {
       Alert.alert('Run too short', 'Please run for at least a few seconds to save.');
       return;
     }
 
-    const profile = await getProfile();
-    if (!profile) {
-      Alert.alert('Error', 'Please set up your profile first');
+    const user = await getCurrentUser();
+    if (!user) {
+      Alert.alert('Error', 'Please sign in to save your run');
       return;
     }
 
-    const pace = distance > 0 ? Math.round(duration / distance) : 0; // seconds per km
-
-    const newRun: Run = {
-      id: `run_${Date.now()}`,
-      userId: profile.id,
-      distance,
-      duration,
-      pace,
-      date: startTime || Date.now(),
-      sharedWith: [],
-      route,
+    const pace = calculatePace(distance, duration);
+    const durationInterval = secondsToInterval(duration);
+    
+    const routeData: RouteData = {
+      coordinates: route.map(r => ({ latitude: r.latitude, longitude: r.longitude })),
+      startLocation: route[0] ? { latitude: route[0].latitude, longitude: route[0].longitude } : undefined,
+      endLocation: route[route.length - 1] ? { latitude: route[route.length - 1].latitude, longitude: route[route.length - 1].longitude } : undefined,
     };
 
-    const success = await saveRun(newRun);
-    if (success) {
-      setSavedRun(newRun);
+    const result = await createRun({
+      run_date: new Date().toISOString().split('T')[0],
+      run_time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      distance_km: Math.round(distance * 100) / 100,
+      duration: durationInterval,
+      pace,
+      route_data: routeData,
+    });
+
+    if (result.success) {
+      const run = result.run;
+      
+      if (run) {
+        // Update user stats
+        const statsResult = await updateUserStatsAfterRun(run);
+        
+        // Check for achievements
+        if (statsResult.success && statsResult.stats) {
+          const newAchievements = await checkAndAwardAchievements(run, statsResult.stats);
+          if (newAchievements.length > 0) {
+            Alert.alert(
+              'Achievement Unlocked! 🏆',
+              newAchievements.map(a => a.title).join(', ')
+            );
+          }
+        }
+        
+        setSavedRun(run);
+        setShowPostModal(true);
+      }
+
+      if (result.queued) {
+        Alert.alert('Run Saved Offline', 'Your run will be synced when you\'re back online.');
+      }
+      
+      // Reset state
       setDistance(0);
       setDuration(0);
       setRoute([]);
       setStartTime(null);
       lastLocationRef.current = null;
-      // Show post modal
-      setShowPostModal(true);
     } else {
-      Alert.alert('Error', 'Failed to save run');
+      Alert.alert('Error', result.error || 'Failed to save run');
     }
   };
 
@@ -215,14 +245,15 @@ export default function HomeScreen() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const formatPace = (secondsPerKm: number): string => {
-    if (secondsPerKm === 0) return '0:00';
+  const formatPace = (distKm: number, durSecs: number): string => {
+    if (distKm === 0 || durSecs === 0) return '0:00';
+    const secondsPerKm = durSecs / distKm;
     const mins = Math.floor(secondsPerKm / 60);
-    const secs = secondsPerKm % 60;
+    const secs = Math.floor(secondsPerKm % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const pace = distance > 0 ? Math.round(duration / distance) : 0;
+  const pace = formatPace(distance, duration);
 
   if (loading) {
     return (
@@ -258,7 +289,7 @@ export default function HomeScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Header with stats - Clean Pace Minimal style */}
+      {/* Header with stats */}
       <View style={[styles.header, { 
         backgroundColor: colorScheme === 'dark' ? colors.card : colors.backgroundSecondary,
         borderBottomWidth: 1,
@@ -294,16 +325,16 @@ export default function HomeScreen() {
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
           <View style={styles.statItem}>
-            <ThemedText type="h2" variant="primary">{formatPace(pace)}</ThemedText>
+            <ThemedText type="h2" variant="primary">{pace}</ThemedText>
             <ThemedText type="caption" variant="muted">pace</ThemedText>
           </View>
         </Animated.View>
       </View>
 
-      {/* Map - Platform-specific component */}
+      {/* Map */}
       <RunningMap latitude={latitude} longitude={longitude} colors={colors} />
 
-      {/* Control Panel - Clean, minimal design */}
+      {/* Control Panel */}
       <View style={[styles.controlPanel, { 
         backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
         borderTopWidth: 1,
@@ -363,9 +394,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
   },
-  loadingText: {
-    // Styled by ThemedText
-  },
+  loadingText: {},
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -380,7 +409,6 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: Spacing.md,
     paddingHorizontal: Spacing.md,
-    // No shadows - design system uses subtle borders instead
   },
   headerContent: {
     marginBottom: Spacing.md,
@@ -390,9 +418,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
   },
-  headerTitle: {
-    // Styled by ThemedText
-  },
+  headerTitle: {},
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -413,7 +439,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.lg,
-    // No shadows - design system uses subtle borders instead
   },
   startButton: {
     flexDirection: 'row',

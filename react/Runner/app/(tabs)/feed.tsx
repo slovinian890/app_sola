@@ -1,74 +1,92 @@
-import { StyleSheet, View, TouchableOpacity, FlatList, TextInput, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import { StyleSheet, View, TouchableOpacity, FlatList, Alert, RefreshControl } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
 import { Image } from 'expo-image';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Colors, Spacing, BorderRadius, CleanPaceColors } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { getPosts, toggleLikePost, Post, getProfile } from '@/services/dataService';
 import { useFocusEffect } from 'expo-router';
-import { useCallback } from 'react';
+import { getFeedPosts, toggleLike } from '@/services/socialService';
+import { getCurrentUser } from '@/services/authService';
+import { PostWithAuthor } from '@/services/supabase';
+import { intervalToSeconds } from '@/services/runsService';
 
 export default function FeedScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<PostWithAuthor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadProfile();
+    loadUser();
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadPosts();
-    }, [currentUserId])
+    }, [])
   );
 
-  const loadProfile = async () => {
-    const profile = await getProfile();
-    if (profile) {
-      setCurrentUserId(profile.id);
+  const loadUser = async () => {
+    const user = await getCurrentUser();
+    if (user) {
+      setCurrentUserId(user.id);
     }
   };
 
   const loadPosts = async () => {
-    const allPosts = await getPosts();
-    // Mark which posts are liked by current user
-    const postsWithLikes = allPosts.map(post => ({
-      ...post,
-      likedByCurrentUser: currentUserId ? post.likes.includes(currentUserId) : false,
-    }));
-    setPosts(postsWithLikes.sort((a, b) => b.date - a.date));
-    setLoading(false);
+    try {
+      const result = await getFeedPosts({ page: 1, limit: 20 });
+      setPosts(result.data);
+    } catch (error) {
+      console.error('Error loading posts:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
-  const handleLike = async (post: Post) => {
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadPosts();
+  };
+
+  const handleLike = async (post: PostWithAuthor) => {
     if (!currentUserId) {
-      Alert.alert('Error', 'Please set up your profile first');
+      Alert.alert('Error', 'Please sign in to like posts');
       return;
     }
 
-    await toggleLikePost(post.id, currentUserId);
-    await loadPosts();
+    const result = await toggleLike(post.id);
+    if (result.success) {
+      // Update local state
+      setPosts(prev => prev.map(p => {
+        if (p.id === post.id) {
+          return {
+            ...p,
+            is_liked: result.liked,
+            likes_count: result.liked ? (p.likes_count ?? 0) + 1 : Math.max(0, (p.likes_count ?? 0) - 1),
+          };
+        }
+        return p;
+      }));
+    }
   };
 
-  const formatDuration = (seconds: number): string => {
+  const formatDuration = (interval: string | null): string => {
+    if (!interval) return '0:00';
+    const seconds = intervalToSeconds(interval);
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const formatPace = (secondsPerKm: number): string => {
-    const mins = Math.floor(secondsPerKm / 60);
-    const secs = secondsPerKm % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatTimeAgo = (timestamp: number): string => {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  const formatTimeAgo = (timestamp: string): string => {
+    const date = new Date(timestamp);
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
@@ -78,7 +96,7 @@ export default function FeedScreen() {
     return `${days}d ago`;
   };
 
-  const renderPost = ({ item }: { item: Post }) => (
+  const renderPost = ({ item }: { item: PostWithAuthor }) => (
     <View style={[styles.postCard, { 
       backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
       borderWidth: 1,
@@ -86,48 +104,54 @@ export default function FeedScreen() {
     }]}>
       <View style={styles.postHeader}>
         <View style={styles.userInfo}>
-          {item.profilePicture ? (
-            <Image source={{ uri: item.profilePicture }} style={styles.avatar} />
+          {item.profiles?.avatar_url ? (
+            <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
           ) : (
             <View style={[styles.avatarPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
               <IconSymbol name="person.fill" size={20} color={colors.primary} />
             </View>
           )}
           <View style={styles.userDetails}>
-            <ThemedText type="bodyBold">{item.username}</ThemedText>
-            <ThemedText type="caption" variant="muted">{formatTimeAgo(item.date)}</ThemedText>
+            <ThemedText type="bodyBold">
+              {item.profiles?.display_name || item.profiles?.username || 'Unknown'}
+            </ThemedText>
+            <ThemedText type="caption" variant="muted">{formatTimeAgo(item.created_at)}</ThemedText>
           </View>
         </View>
       </View>
 
-      <ThemedText type="body" style={styles.description}>{item.description}</ThemedText>
+      {item.content && (
+        <ThemedText type="body" style={styles.description}>{item.content}</ThemedText>
+      )}
 
-      <View style={[styles.runStats, { 
-        backgroundColor: colorScheme === 'dark' ? colors.background : colors.backgroundSecondary,
-        borderWidth: 1,
-        borderColor: colors.border,
-      }]}>
-        <View style={styles.statItem}>
-          <ThemedText type="h3" variant="primary">
-            {item.distance.toFixed(2)}
-          </ThemedText>
-          <ThemedText type="caption" variant="muted">km</ThemedText>
+      {item.runs && (
+        <View style={[styles.runStats, { 
+          backgroundColor: colorScheme === 'dark' ? colors.background : colors.backgroundSecondary,
+          borderWidth: 1,
+          borderColor: colors.border,
+        }]}>
+          <View style={styles.statItem}>
+            <ThemedText type="h3" variant="primary">
+              {item.runs.distance_km?.toFixed(2) ?? '0.00'}
+            </ThemedText>
+            <ThemedText type="caption" variant="muted">km</ThemedText>
+          </View>
+          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.statItem}>
+            <ThemedText type="h3" variant="primary">
+              {formatDuration(item.runs.duration)}
+            </ThemedText>
+            <ThemedText type="caption" variant="muted">time</ThemedText>
+          </View>
+          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.statItem}>
+            <ThemedText type="h3" variant="primary">
+              {item.runs.pace ?? '0:00'}
+            </ThemedText>
+            <ThemedText type="caption" variant="muted">pace/km</ThemedText>
+          </View>
         </View>
-        <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-        <View style={styles.statItem}>
-          <ThemedText type="h3" variant="primary">
-            {formatDuration(item.duration)}
-          </ThemedText>
-          <ThemedText type="caption" variant="muted">time</ThemedText>
-        </View>
-        <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-        <View style={styles.statItem}>
-          <ThemedText type="h3" variant="primary">
-            {formatPace(item.pace)}
-          </ThemedText>
-          <ThemedText type="caption" variant="muted">pace/km</ThemedText>
-        </View>
-      </View>
+      )}
 
       <View style={[styles.postActions, { borderTopColor: colors.border }]}>
         <TouchableOpacity
@@ -135,14 +159,20 @@ export default function FeedScreen() {
           onPress={() => handleLike(item)}
           activeOpacity={0.7}>
           <IconSymbol
-            name={item.likedByCurrentUser ? "heart.fill" : "heart"}
+            name={item.is_liked ? "heart.fill" : "heart"}
             size={20}
-            color={item.likedByCurrentUser ? colors.primary : colors.icon}
+            color={item.is_liked ? colors.primary : colors.icon}
           />
           <ThemedText
             type="bodySmall"
-            variant={item.likedByCurrentUser ? "primary" : "muted"}>
-            {item.likes.length}
+            variant={item.is_liked ? "primary" : "muted"}>
+            {item.likes_count ?? 0}
+          </ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionButton} activeOpacity={0.7}>
+          <IconSymbol name="bubble.left" size={20} color={colors.icon} />
+          <ThemedText type="bodySmall" variant="muted">
+            {item.comments_count ?? 0}
           </ThemedText>
         </TouchableOpacity>
       </View>
@@ -184,6 +214,9 @@ export default function FeedScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.postsList}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
         />
       )}
     </ThemedView>
@@ -263,6 +296,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingTop: Spacing.xs,
     borderTopWidth: 1,
+    gap: Spacing.lg,
   },
   actionButton: {
     flexDirection: 'row',
@@ -284,4 +318,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

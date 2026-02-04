@@ -5,7 +5,6 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { initializeDemoData } from '@/services/dataService';
 import AuthGuard from '@/components/auth-guard';
 
 export const unstable_settings = {
@@ -16,8 +15,24 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
-    // Initialize demo data on app start
-    initializeDemoData();
+    // Initialize offline queue on app start (lazy load to prevent blocking)
+    const initOfflineQueue = async () => {
+      try {
+        const { offlineQueue } = await import('@/services/offlineQueue');
+        await offlineQueue.init();
+      } catch (error) {
+        console.error('Failed to initialize offline queue:', error);
+      }
+    };
+    
+    initOfflineQueue();
+
+    // Cleanup on unmount
+    return () => {
+      import('@/services/offlineQueue').then(({ offlineQueue }) => {
+        offlineQueue.cleanup();
+      }).catch(() => {});
+    };
   }, []);
 
   return (

@@ -1,105 +1,210 @@
-import { StyleSheet, View, TextInput, TouchableOpacity, Alert, FlatList, Text } from 'react-native';
-import { useState, useEffect } from 'react';
+import { StyleSheet, View, TextInput, TouchableOpacity, Alert, FlatList, RefreshControl } from 'react-native';
+import { useState, useCallback } from 'react';
 import { Image } from 'expo-image';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius, CleanPaceColors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { getFriends, addFriend, removeFriend, Friend } from '@/services/dataService';
+import { useFocusEffect } from 'expo-router';
+import { 
+  getFollowing, 
+  getFollowers,
+  unfollowUser, 
+  followUser,
+  getFollowerCount,
+  getFollowingCount,
+} from '@/services/socialService';
+import { searchProfiles } from '@/services/profileService';
+import { getCurrentUser } from '@/services/authService';
+import { Profile } from '@/services/supabase';
+
+type TabType = 'following' | 'followers' | 'search';
 
 export default function FriendsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [username, setUsername] = useState('');
+  const [following, setFollowing] = useState<Profile[]>([]);
+  const [followers, setFollowers] = useState<Profile[]>([]);
+  const [searchResults, setSearchResults] = useState<Profile[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<TabType>('following');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [followerCount, setFollowerCount] = useState(0);
 
-  useEffect(() => {
-    loadFriends();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
 
-  const loadFriends = async () => {
-    const friendsList = await getFriends();
-    setFriends(friendsList);
-    setLoading(false);
+  const loadData = async () => {
+    try {
+      const user = await getCurrentUser();
+      if (user) {
+        setCurrentUserId(user.id);
+        
+        const [followingResult, followersResult, fCount, fgCount] = await Promise.all([
+          getFollowing(user.id),
+          getFollowers(user.id),
+          getFollowerCount(user.id),
+          getFollowingCount(user.id),
+        ]);
+        
+        setFollowing(followingResult.data);
+        setFollowers(followersResult.data);
+        setFollowerCount(fCount);
+        setFollowingCount(fgCount);
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
-  const handleAddFriend = async () => {
-    if (!username.trim()) {
-      Alert.alert('Error', 'Please enter a username');
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadData();
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
       return;
     }
 
-    // In a real app, you would search for users by username
-    // For now, we'll create a friend with the entered username
-    const newFriend: Friend = {
-      id: `friend_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      username: username.trim(),
-      addedAt: Date.now(),
-    };
-
-    const success = await addFriend(newFriend);
-    if (success) {
-      setUsername('');
-      await loadFriends();
-      Alert.alert('Success', `Added ${newFriend.username} as a friend!`);
-    } else {
-      Alert.alert('Error', 'Friend already exists or failed to add');
+    const result = await searchProfiles(searchQuery.trim());
+    if (result.success && result.profiles) {
+      // Filter out current user
+      const filtered = result.profiles.filter(p => p.id !== currentUserId);
+      setSearchResults(filtered);
     }
   };
 
-  const handleRemoveFriend = (friendId: string, friendUsername: string) => {
+  const handleFollow = async (userId: string) => {
+    const result = await followUser(userId);
+    if (result.success) {
+      Alert.alert('Success', 'You are now following this user!');
+      loadData();
+    } else {
+      Alert.alert('Error', result.error || 'Failed to follow user');
+    }
+  };
+
+  const handleUnfollow = (userId: string, username: string) => {
     Alert.alert(
-      'Remove Friend',
-      `Are you sure you want to remove ${friendUsername}?`,
+      'Unfollow',
+      `Are you sure you want to unfollow ${username}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Remove',
+          text: 'Unfollow',
           style: 'destructive',
           onPress: async () => {
-            await removeFriend(friendId);
-            await loadFriends();
+            const result = await unfollowUser(userId);
+            if (result.success) {
+              loadData();
+            } else {
+              Alert.alert('Error', result.error || 'Failed to unfollow user');
+            }
           },
         },
       ]
     );
   };
 
-  const renderFriend = ({ item }: { item: Friend }) => (
-    <View style={[styles.friendCard, { 
-      backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
-      borderWidth: 1,
-      borderColor: colors.border,
-    }]}>
-      <View style={styles.friendInfo}>
-        {item.profilePicture ? (
-          <Image source={{ uri: item.profilePicture }} style={styles.friendAvatar} />
-        ) : (
-          <View style={[styles.friendAvatarPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
-            <IconSymbol name="person.fill" size={24} color={colors.primary} />
+  const isFollowingUser = (userId: string) => {
+    return following.some(f => f.id === userId);
+  };
+
+  const renderUser = ({ item }: { item: Profile }) => {
+    const isFollowed = isFollowingUser(item.id);
+    
+    return (
+      <View style={[styles.userCard, { 
+        backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
+        borderWidth: 1,
+        borderColor: colors.border,
+      }]}>
+        <View style={styles.userInfo}>
+          {item.avatar_url ? (
+            <Image source={{ uri: item.avatar_url }} style={styles.userAvatar} />
+          ) : (
+            <View style={[styles.userAvatarPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
+              <IconSymbol name="person.fill" size={24} color={colors.primary} />
+            </View>
+          )}
+          <View style={styles.userDetails}>
+            <ThemedText type="bodyBold">{item.display_name || item.username}</ThemedText>
+            <ThemedText type="caption" variant="muted">@{item.username}</ThemedText>
           </View>
-        )}
-        <View style={styles.friendDetails}>
-          <ThemedText type="bodyBold">{item.username}</ThemedText>
-          <ThemedText type="caption" variant="muted">
-            Added {new Date(item.addedAt).toLocaleDateString()}
-          </ThemedText>
         </View>
+        
+        {activeTab === 'following' ? (
+          <TouchableOpacity
+            onPress={() => handleUnfollow(item.id, item.username)}
+            style={[styles.actionButton, { 
+              backgroundColor: colorScheme === 'dark' ? colors.background : colors.backgroundSecondary,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }]}
+            activeOpacity={0.7}>
+            <ThemedText type="bodySmall" variant="muted">Unfollow</ThemedText>
+          </TouchableOpacity>
+        ) : activeTab === 'search' ? (
+          <TouchableOpacity
+            onPress={() => isFollowed ? handleUnfollow(item.id, item.username) : handleFollow(item.id)}
+            style={[
+              styles.actionButton, 
+              { 
+                backgroundColor: isFollowed ? colors.backgroundSecondary : colors.primary,
+                borderWidth: 1,
+                borderColor: isFollowed ? colors.border : colors.primary,
+              }
+            ]}
+            activeOpacity={0.7}>
+            <ThemedText 
+              type="bodySmall" 
+              lightColor={isFollowed ? colors.text : CleanPaceColors.offWhite}
+              darkColor={isFollowed ? colors.text : CleanPaceColors.offWhite}>
+              {isFollowed ? 'Following' : 'Follow'}
+            </ThemedText>
+          </TouchableOpacity>
+        ) : null}
       </View>
-      <TouchableOpacity
-        onPress={() => handleRemoveFriend(item.id, item.username)}
-        style={[styles.removeButton, { 
-          backgroundColor: colorScheme === 'dark' ? colors.background : colors.backgroundSecondary,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }]}
-        activeOpacity={0.7}>
-        <IconSymbol name="trash.fill" size={20} color={colors.primary} />
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
+
+  const getListData = () => {
+    switch (activeTab) {
+      case 'following':
+        return following;
+      case 'followers':
+        return followers;
+      case 'search':
+        return searchResults;
+      default:
+        return [];
+    }
+  };
+
+  const getEmptyMessage = () => {
+    switch (activeTab) {
+      case 'following':
+        return "You're not following anyone yet";
+      case 'followers':
+        return "You don't have any followers yet";
+      case 'search':
+        return searchQuery ? 'No users found' : 'Search for users';
+      default:
+        return '';
+    }
+  };
 
   return (
     <ThemedView style={styles.container}>
@@ -108,44 +213,117 @@ export default function FriendsScreen() {
         borderBottomWidth: 1,
         borderBottomColor: colors.border,
       }]}>
-        <ThemedText type="h3">Friends</ThemedText>
-      </View>
-
-      <View style={[styles.addFriendSection, { borderBottomColor: colors.border }]}>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={[styles.input, {
-              backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
-              borderColor: colors.border,
-              color: colors.text,
-            }]}
-            value={username}
-            onChangeText={setUsername}
-            placeholder="Enter friend's username"
-            placeholderTextColor={colors.textMuted}
-          />
-          <TouchableOpacity
-            style={[styles.addButton, { backgroundColor: colors.primary }]}
-            onPress={handleAddFriend}
-            activeOpacity={0.7}>
-            <IconSymbol name="plus" size={24} color={CleanPaceColors.offWhite} />
-          </TouchableOpacity>
+        <ThemedText type="h3">Social</ThemedText>
+        <View style={styles.statsRow}>
+          <ThemedText type="bodySmall" variant="muted">
+            {followingCount} Following · {followerCount} Followers
+          </ThemedText>
         </View>
       </View>
 
-      {friends.length === 0 ? (
+      <View style={styles.tabs}>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            { 
+              borderWidth: 1,
+              borderColor: activeTab === 'following' ? colors.primary : colors.border,
+              backgroundColor: activeTab === 'following' ? colors.primary : colors.background,
+            },
+          ]}
+          onPress={() => setActiveTab('following')}
+          activeOpacity={0.7}>
+          <ThemedText
+            type="bodyBold"
+            lightColor={activeTab === 'following' ? CleanPaceColors.offWhite : colors.text}
+            darkColor={activeTab === 'following' ? CleanPaceColors.offWhite : colors.text}>
+            Following
+          </ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            { 
+              borderWidth: 1,
+              borderColor: activeTab === 'followers' ? colors.primary : colors.border,
+              backgroundColor: activeTab === 'followers' ? colors.primary : colors.background,
+            },
+          ]}
+          onPress={() => setActiveTab('followers')}
+          activeOpacity={0.7}>
+          <ThemedText
+            type="bodyBold"
+            lightColor={activeTab === 'followers' ? CleanPaceColors.offWhite : colors.text}
+            darkColor={activeTab === 'followers' ? CleanPaceColors.offWhite : colors.text}>
+            Followers
+          </ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            { 
+              borderWidth: 1,
+              borderColor: activeTab === 'search' ? colors.primary : colors.border,
+              backgroundColor: activeTab === 'search' ? colors.primary : colors.background,
+            },
+          ]}
+          onPress={() => setActiveTab('search')}
+          activeOpacity={0.7}>
+          <IconSymbol 
+            name="magnifyingglass" 
+            size={18} 
+            color={activeTab === 'search' ? CleanPaceColors.offWhite : colors.text} 
+          />
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === 'search' && (
+        <View style={[styles.searchSection, { borderBottomColor: colors.border }]}>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={[styles.input, {
+                backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
+                borderColor: colors.border,
+                color: colors.text,
+              }]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search by username"
+              placeholderTextColor={colors.textMuted}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+            />
+            <TouchableOpacity
+              style={[styles.searchButton, { backgroundColor: colors.primary }]}
+              onPress={handleSearch}
+              activeOpacity={0.7}>
+              <IconSymbol name="magnifyingglass" size={20} color={CleanPaceColors.offWhite} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ThemedText type="body" variant="secondary">Loading...</ThemedText>
+        </View>
+      ) : getListData().length === 0 ? (
         <View style={styles.emptyState}>
           <IconSymbol name="person.2.fill" size={64} color={colors.icon} />
-          <ThemedText type="h3" style={styles.emptyText}>No friends yet</ThemedText>
-          <ThemedText type="body" variant="muted" style={styles.emptySubtext}>Add friends to share your runs!</ThemedText>
+          <ThemedText type="h3" style={styles.emptyText}>{getEmptyMessage()}</ThemedText>
         </View>
       ) : (
         <FlatList
-          data={friends}
-          renderItem={renderFriend}
+          data={getListData()}
+          renderItem={renderUser}
           keyExtractor={item => item.id}
-          contentContainerStyle={styles.friendsList}
+          contentContainerStyle={styles.usersList}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            activeTab !== 'search' ? (
+              <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+            ) : undefined
+          }
         />
       )}
     </ThemedView>
@@ -161,8 +339,25 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
     paddingHorizontal: Spacing.md,
   },
-  addFriendSection: {
+  statsRow: {
+    marginTop: Spacing.xs,
+  },
+  tabs: {
+    flexDirection: 'row',
     padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchSection: {
+    padding: Spacing.md,
+    paddingTop: 0,
     borderBottomWidth: 1,
   },
   inputRow: {
@@ -178,17 +373,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     fontSize: 16,
   },
-  addButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  searchButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  friendsList: {
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  usersList: {
     padding: Spacing.md,
   },
-  friendCard: {
+  userCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -196,18 +396,18 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.card,
     marginBottom: Spacing.sm,
   },
-  friendInfo: {
+  userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  friendAvatar: {
+  userAvatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
     marginRight: Spacing.sm,
   },
-  friendAvatarPlaceholder: {
+  userAvatarPlaceholder: {
     width: 50,
     height: 50,
     borderRadius: 25,
@@ -215,15 +415,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: Spacing.sm,
   },
-  friendDetails: {
+  userDetails: {
     flex: 1,
   },
-  removeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
+  actionButton: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.small,
   },
   emptyState: {
     flex: 1,
@@ -233,10 +431,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     marginTop: Spacing.md,
-    marginBottom: Spacing.xs,
-  },
-  emptySubtext: {
     textAlign: 'center',
   },
 });
-

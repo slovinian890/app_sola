@@ -5,7 +5,9 @@ import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { createPost, markRunAsPosted, getProfile, Post, Run } from '@/services/dataService';
+import { createPost } from '@/services/socialService';
+import { Run } from '@/services/supabase';
+import { intervalToSeconds } from '@/services/runsService';
 
 interface PostRunModalProps {
   visible: boolean;
@@ -29,43 +31,30 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
     }
 
     setPosting(true);
-    const profile = await getProfile();
-    if (!profile) {
-      Alert.alert('Error', 'Please set up your profile first');
-      setPosting(false);
-      return;
-    }
-
-    const newPost: Post = {
-      id: `post_${Date.now()}`,
-      userId: profile.id,
-      username: profile.username,
-      profilePicture: profile.profilePicture,
-      runId: run.id,
-      description: description.trim(),
-      distance: run.distance,
-      duration: run.duration,
-      pace: run.pace,
-      date: run.date,
-      likes: [],
-    };
-
-    const success = await createPost(newPost);
-    if (success) {
-      await markRunAsPosted(run.id);
+    
+    const result = await createPost({
+      type: 'run',
+      title: run.title || `Run on ${new Date(run.run_date).toLocaleDateString()}`,
+      content: description.trim(),
+      run_id: run.id,
+    });
+    
+    if (result.success) {
       setDescription('');
       onPost();
       onClose();
       Alert.alert('Success', 'Run posted to feed!');
     } else {
-      Alert.alert('Error', 'Failed to post run');
+      Alert.alert('Error', result.error || 'Failed to post run');
     }
     setPosting(false);
   };
 
   if (!run) return null;
 
-  const formatDuration = (seconds: number): string => {
+  const formatDuration = (interval: string | null): string => {
+    if (!interval) return '0:00';
+    const seconds = intervalToSeconds(interval);
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -75,7 +64,7 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <ThemedView style={styles.modal}>
-          <View style={[styles.header, { backgroundColor: colors.running }]}>
+          <View style={[styles.header, { backgroundColor: colors.primary }]}>
             <ThemedText style={styles.headerTitle}>Post Your Run</ThemedText>
             <TouchableOpacity onPress={onClose}>
               <IconSymbol name="xmark" size={24} color="#FFFFFF" />
@@ -83,23 +72,23 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
           </View>
 
           <View style={styles.content}>
-            <View style={[styles.runSummary, { backgroundColor: colors.running + '10' }]}>
+            <View style={[styles.runSummary, { backgroundColor: colors.primary + '10' }]}>
               <View style={styles.summaryRow}>
                 <ThemedText style={styles.summaryLabel}>Distance:</ThemedText>
-                <ThemedText style={[styles.summaryValue, { color: colors.running }]}>
-                  {run.distance.toFixed(2)} km
+                <ThemedText style={[styles.summaryValue, { color: colors.primary }]}>
+                  {run.distance_km.toFixed(2)} km
                 </ThemedText>
               </View>
               <View style={styles.summaryRow}>
                 <ThemedText style={styles.summaryLabel}>Duration:</ThemedText>
-                <ThemedText style={[styles.summaryValue, { color: colors.running }]}>
+                <ThemedText style={[styles.summaryValue, { color: colors.primary }]}>
                   {formatDuration(run.duration)}
                 </ThemedText>
               </View>
               <View style={styles.summaryRow}>
                 <ThemedText style={styles.summaryLabel}>Pace:</ThemedText>
-                <ThemedText style={[styles.summaryValue, { color: colors.running }]}>
-                  {Math.floor(run.pace / 60)}:{(run.pace % 60).toString().padStart(2, '0')} /km
+                <ThemedText style={[styles.summaryValue, { color: colors.primary }]}>
+                  {run.pace ?? '0:00'} /km
                 </ThemedText>
               </View>
             </View>
@@ -109,7 +98,7 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
               <TextInput
                 style={[styles.input, {
                   backgroundColor: colors.background,
-                  borderColor: colors.running,
+                  borderColor: colors.primary,
                   color: colors.text,
                 }]}
                 value={description}
@@ -128,7 +117,7 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
             <TouchableOpacity
               style={[
                 styles.postButton,
-                { backgroundColor: colors.running },
+                { backgroundColor: colors.primary },
                 posting && { opacity: 0.6 },
               ]}
               onPress={handlePost}
@@ -240,4 +229,3 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-

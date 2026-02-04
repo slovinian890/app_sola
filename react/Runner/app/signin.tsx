@@ -4,15 +4,21 @@ import { router } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Colors, Spacing, BorderRadius, Animation, CleanPaceColors } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius, CleanPaceColors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { sendVerificationCode, login } from '@/services/authService';
+import { signIn, signUp } from '@/services/authService';
+
+type AuthMode = 'signin' | 'signup';
 
 export default function SignInScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   
   // Breathing animation for icon
   const breathScale = useRef(new Animated.Value(1)).current;
@@ -35,32 +41,104 @@ export default function SignInScreen() {
     ).start();
   }, []);
 
-  const handleSendCode = async () => {
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  };
+
+  const validatePassword = (password: string): boolean => {
+    return password.length >= 6;
+  };
+
+  const handleSignIn = async () => {
     if (!email.trim()) {
       Alert.alert('Error', 'Please enter your email address');
       return;
     }
 
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
+    if (!validateEmail(email)) {
       Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
 
+    if (!password) {
+      Alert.alert('Error', 'Please enter your password');
+      return;
+    }
+
     setLoading(true);
-    const success = await sendVerificationCode(email.trim());
+    const result = await signIn({ email: email.trim(), password });
     setLoading(false);
 
-    if (success) {
-      // Navigate to verification screen
-      router.push({
-        pathname: '/verify',
-        params: { email: email.trim() },
-      });
+    if (result.success) {
+      router.replace('/(tabs)');
     } else {
-      Alert.alert('Error', 'Failed to send verification code. Please try again.');
+      Alert.alert('Sign In Failed', result.error || 'Invalid credentials');
     }
+  };
+
+  const handleSignUp = async () => {
+    if (!email.trim()) {
+      Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return;
+    }
+
+    if (!username.trim()) {
+      Alert.alert('Error', 'Please enter a username');
+      return;
+    }
+
+    if (username.trim().length < 3) {
+      Alert.alert('Error', 'Username must be at least 3 characters');
+      return;
+    }
+
+    if (!validatePassword(password)) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
+      return;
+    }
+
+    setLoading(true);
+    const result = await signUp({
+      email: email.trim(),
+      password,
+      username: username.trim(),
+    });
+    setLoading(false);
+
+    if (result.success) {
+      // Check if email confirmation is required
+      if (result.user && !result.session) {
+        Alert.alert(
+          'Check Your Email',
+          'We sent you a confirmation link. Please check your email to verify your account.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        router.replace('/(tabs)');
+      }
+    } else {
+      Alert.alert('Sign Up Failed', result.error || 'Unable to create account');
+    }
+  };
+
+  const handleSubmit = () => {
+    if (mode === 'signin') {
+      handleSignIn();
+    } else {
+      handleSignUp();
+    }
+  };
+
+  const toggleMode = () => {
+    setMode(mode === 'signin' ? 'signup' : 'signin');
+    setPassword('');
+    setUsername('');
   };
 
   return (
@@ -88,11 +166,38 @@ export default function SignInScreen() {
             
             <ThemedText type="h1" style={styles.title}>Run Tracker</ThemedText>
             <ThemedText type="body" variant="secondary" style={styles.subtitle}>
-              Sign in to continue
+              {mode === 'signin' ? 'Welcome back!' : 'Create your account'}
             </ThemedText>
           </View>
 
           <View style={styles.form}>
+            {/* Username field (sign up only) */}
+            {mode === 'signup' && (
+              <View style={styles.inputContainer}>
+                <ThemedText type="bodyBold" style={styles.label}>Username</ThemedText>
+                <View style={[
+                  styles.inputWrapper, 
+                  { 
+                    borderColor: colors.border,
+                    backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
+                  }
+                ]}>
+                  <IconSymbol name="person.fill" size={18} color={colors.icon} style={styles.inputIcon} />
+                  <TextInput
+                    style={[styles.input, { color: colors.text }]}
+                    value={username}
+                    onChangeText={setUsername}
+                    placeholder="Choose a username"
+                    placeholderTextColor={colors.textMuted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Email field */}
             <View style={styles.inputContainer}>
               <ThemedText type="bodyBold" style={styles.label}>Email Address</ThemedText>
               <View style={[
@@ -117,42 +222,84 @@ export default function SignInScreen() {
               </View>
             </View>
 
+            {/* Password field */}
+            <View style={styles.inputContainer}>
+              <ThemedText type="bodyBold" style={styles.label}>Password</ThemedText>
+              <View style={[
+                styles.inputWrapper, 
+                { 
+                  borderColor: colors.border,
+                  backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
+                }
+              ]}>
+                <IconSymbol name="lock.fill" size={18} color={colors.icon} style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.input, { color: colors.text }]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder={mode === 'signin' ? 'Enter your password' : 'Create a password'}
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!loading}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+                  <IconSymbol 
+                    name={showPassword ? 'eye.slash.fill' : 'eye.fill'} 
+                    size={18} 
+                    color={colors.icon} 
+                  />
+                </TouchableOpacity>
+              </View>
+              {mode === 'signup' && (
+                <ThemedText type="caption" variant="muted" style={styles.passwordHint}>
+                  Must be at least 6 characters
+                </ThemedText>
+              )}
+            </View>
+
+            {/* Forgot password link (sign in only) */}
+            {mode === 'signin' && (
+              <TouchableOpacity
+                style={styles.forgotPassword}
+                onPress={() => router.push('/verify')}
+                activeOpacity={0.7}>
+                <ThemedText type="bodySmall" variant="secondary">
+                  Forgot password?
+                </ThemedText>
+              </TouchableOpacity>
+            )}
+
+            {/* Submit button */}
             <TouchableOpacity
               style={[
                 styles.button,
                 { backgroundColor: colors.primary },
                 loading && { opacity: 0.6 },
               ]}
-              onPress={handleSendCode}
+              onPress={handleSubmit}
               disabled={loading}
               activeOpacity={0.7}>
               <ThemedText type="bodyBold" lightColor={CleanPaceColors.offWhite} darkColor={CleanPaceColors.offWhite}>
-                {loading ? 'Sending...' : 'Send Verification Code'}
+                {loading 
+                  ? (mode === 'signin' ? 'Signing In...' : 'Creating Account...') 
+                  : (mode === 'signin' ? 'Sign In' : 'Create Account')
+                }
               </ThemedText>
             </TouchableOpacity>
 
-            <ThemedText type="bodySmall" variant="muted" style={styles.infoText}>
-              We'll send a 6-digit verification code to your email
-            </ThemedText>
-
-            <View style={styles.divider}>
-              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-              <ThemedText type="caption" variant="muted" style={styles.dividerText}>OR</ThemedText>
-              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+            {/* Toggle mode */}
+            <View style={styles.toggleContainer}>
+              <ThemedText type="body" variant="secondary">
+                {mode === 'signin' ? "Don't have an account? " : 'Already have an account? '}
+              </ThemedText>
+              <TouchableOpacity onPress={toggleMode} disabled={loading}>
+                <ThemedText type="bodyBold" style={{ color: colors.primary }}>
+                  {mode === 'signin' ? 'Sign Up' : 'Sign In'}
+                </ThemedText>
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={[styles.skipButton, { borderColor: colors.border }]}
-              onPress={async () => {
-                // Skip authentication and login as guest
-                await login('guest@runner.app');
-                router.push('/(tabs)');
-              }}
-              activeOpacity={0.7}>
-              <ThemedText type="bodyBold" variant="secondary">
-                Continue Without Email
-              </ThemedText>
-            </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -227,6 +374,9 @@ const styles = StyleSheet.create({
   inputIcon: {
     marginRight: Spacing.sm,
   },
+  eyeIcon: {
+    padding: Spacing.xs,
+  },
   input: {
     flex: 1,
     fontSize: 16,
@@ -237,34 +387,23 @@ const styles = StyleSheet.create({
       default: 'sans-serif',
     }),
   },
+  passwordHint: {
+    marginTop: Spacing.xs,
+  },
+  forgotPassword: {
+    alignSelf: 'flex-end',
+    marginBottom: Spacing.md,
+  },
   button: {
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.card,
     alignItems: 'center',
     marginBottom: Spacing.md,
-    // No shadows - design system uses subtle borders instead
   },
-  infoText: {
-    textAlign: 'center',
-    marginBottom: Spacing.lg,
-  },
-  divider: {
+  toggleContainer: {
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: Spacing.lg,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  dividerText: {
-    marginHorizontal: Spacing.md,
-  },
-  skipButton: {
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.card,
-    alignItems: 'center',
-    borderWidth: 1,
+    marginTop: Spacing.sm,
   },
 });
-
