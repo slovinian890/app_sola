@@ -36,13 +36,13 @@ export const getFeedPosts = async (
       .from('posts')
       .select('*', { count: 'exact', head: true });
 
-    // Get posts with author profile and run data
+    // Get posts with author profile and run data (including route_data for map)
     const { data, error } = await supabase
       .from('posts')
       .select(`
         *,
         profiles:user_id (username, display_name, avatar_url),
-        runs:run_id (distance_km, duration, pace)
+        runs:run_id (distance_km, duration, pace, route_data, calories, run_date, run_time)
       `)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
@@ -135,7 +135,7 @@ export const getFollowingFeed = async (
       .select(`
         *,
         profiles:user_id (username, display_name, avatar_url),
-        runs:run_id (distance_km, duration, pace)
+        runs:run_id (distance_km, duration, pace, route_data, calories, run_date, run_time)
       `, { count: 'exact' })
       .in('user_id', followingIds)
       .order('created_at', { ascending: false })
@@ -176,7 +176,7 @@ export const getUserPosts = async (
       .select(`
         *,
         profiles:user_id (username, display_name, avatar_url),
-        runs:run_id (distance_km, duration, pace)
+        runs:run_id (distance_km, duration, pace, route_data, calories, run_date, run_time)
       `, { count: 'exact' })
       .eq('user_id', userId)
       .order('created_at', { ascending: false })

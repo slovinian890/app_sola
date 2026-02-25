@@ -6,7 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius, CleanPaceColors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { 
   getFollowing, 
   getFollowers,
@@ -24,6 +24,7 @@ type TabType = 'following' | 'followers' | 'search';
 export default function FriendsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const router = useRouter();
   const [following, setFollowing] = useState<Profile[]>([]);
   const [followers, setFollowers] = useState<Profile[]>([]);
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
@@ -122,6 +123,16 @@ export default function FriendsScreen() {
     return following.some(f => f.id === userId);
   };
 
+  const handleUserPress = (userId: string) => {
+    if (userId === currentUserId) {
+      // Navigate to own profile tab
+      router.push('/(tabs)/profile');
+    } else {
+      // Navigate to user profile screen
+      router.push({ pathname: '/user-profile', params: { userId } });
+    }
+  };
+
   const renderUser = ({ item }: { item: Profile }) => {
     const isFollowed = isFollowingUser(item.id);
     
@@ -131,7 +142,10 @@ export default function FriendsScreen() {
         borderWidth: 1,
         borderColor: colors.border,
       }]}>
-        <View style={styles.userInfo}>
+        <TouchableOpacity 
+          style={styles.userInfo}
+          onPress={() => handleUserPress(item.id)}
+          activeOpacity={0.7}>
           {item.avatar_url ? (
             <Image source={{ uri: item.avatar_url }} style={styles.userAvatar} />
           ) : (
@@ -143,7 +157,7 @@ export default function FriendsScreen() {
             <ThemedText type="bodyBold">{item.display_name || item.username}</ThemedText>
             <ThemedText type="caption" variant="muted">@{item.username}</ThemedText>
           </View>
-        </View>
+        </TouchableOpacity>
         
         {activeTab === 'following' ? (
           <TouchableOpacity

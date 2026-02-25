@@ -59,6 +59,7 @@ export interface RouteData {
   coordinates: RoutePoint[];
   startLocation?: { latitude: number; longitude: number };
   endLocation?: { latitude: number; longitude: number };
+  trailColor?: string; // User's chosen trail color (hex)
 }
 
 export interface Run {
@@ -115,7 +116,7 @@ export interface Post {
 // Post with joined profile data for feed display
 export interface PostWithAuthor extends Post {
   profiles: Pick<Profile, 'username' | 'display_name' | 'avatar_url'>;
-  runs?: Pick<Run, 'distance_km' | 'duration' | 'pace'> | null;
+  runs?: Pick<Run, 'distance_km' | 'duration' | 'pace' | 'route_data' | 'calories' | 'run_date' | 'run_time'> | null;
   likes_count?: number;
   comments_count?: number;
   is_liked?: boolean;

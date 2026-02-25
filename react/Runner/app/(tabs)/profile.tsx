@@ -12,6 +12,7 @@ import { getCurrentProfile, updateProfile, uploadAvatar } from '@/services/profi
 import { getCurrentUserStats } from '@/services/statsService';
 import { signOut } from '@/services/authService';
 import { Profile, UserStats } from '@/services/supabase';
+import { TRAIL_COLORS, getTrailColor, setTrailColor as saveTrailColor, DEFAULT_TRAIL_COLOR } from '@/services/trailColorService';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme();
@@ -21,9 +22,11 @@ export default function ProfileScreen() {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
+  const [location, setLocation] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [selectedTrailColor, setSelectedTrailColor] = useState(DEFAULT_TRAIL_COLOR);
   const router = useRouter();
   
   // Breathing animation for profile picture
@@ -51,6 +54,7 @@ export default function ProfileScreen() {
     useCallback(() => {
       loadProfile();
       loadStats();
+      getTrailColor().then(setSelectedTrailColor);
     }, [])
   );
 
@@ -62,6 +66,7 @@ export default function ProfileScreen() {
         setUsername(result.profile.username);
         setDisplayName(result.profile.display_name || '');
         setBio(result.profile.bio || '');
+        setLocation(result.profile.location || '');
         setAvatarUrl(result.profile.avatar_url);
       }
     } catch (error) {
@@ -169,6 +174,7 @@ export default function ProfileScreen() {
       username: username.trim(),
       display_name: displayName.trim() || null,
       bio: bio.trim() || null,
+      location: location.trim() || null,
     });
     setSaving(false);
 
@@ -295,6 +301,25 @@ export default function ProfileScreen() {
             />
           </View>
 
+          <View style={styles.inputContainer}>
+            <View style={styles.labelWithIcon}>
+              <IconSymbol name="location.fill" size={16} color={colors.icon} />
+              <ThemedText type="bodyBold" style={styles.label}>Location</ThemedText>
+            </View>
+            <TextInput
+              style={[styles.input, { 
+                backgroundColor: colorScheme === 'dark' ? colors.card : colors.background,
+                borderColor: colors.border,
+                color: colors.text,
+              }]}
+              value={location}
+              onChangeText={setLocation}
+              placeholder="Enter your location (e.g., New York, USA)"
+              placeholderTextColor={colors.textMuted}
+              editable={!saving}
+            />
+          </View>
+
           <TouchableOpacity
             style={[styles.saveButton, { backgroundColor: colors.primary }, saving && { opacity: 0.6 }]}
             onPress={handleSaveProfile}
@@ -304,6 +329,51 @@ export default function ProfileScreen() {
               {saving ? 'Saving...' : 'Save Profile'}
             </ThemedText>
           </TouchableOpacity>
+        </View>
+
+        {/* ── Trail Color Picker ── */}
+        <View style={styles.trailColorSection}>
+          <View style={styles.trailColorHeader}>
+            <IconSymbol name="paintbrush.fill" size={18} color={colors.primary} />
+            <ThemedText type="h3" style={{ marginLeft: Spacing.xs }}>Trail Color</ThemedText>
+          </View>
+          <ThemedText type="bodySmall" variant="muted" style={{ marginBottom: Spacing.md }}>
+            Choose the color of your running trail on the map
+          </ThemedText>
+          <View style={styles.colorGrid}>
+            {TRAIL_COLORS.map((tc) => (
+              <TouchableOpacity
+                key={tc.hex}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setSelectedTrailColor(tc.hex);
+                  saveTrailColor(tc.hex);
+                }}
+                style={[
+                  styles.colorSwatch,
+                  { backgroundColor: tc.hex },
+                  selectedTrailColor === tc.hex && {
+                    borderWidth: 3,
+                    borderColor: colorScheme === 'dark' ? CleanPaceColors.offWhite : CleanPaceColors.charcoal,
+                    transform: [{ scale: 1.15 }],
+                  },
+                ]}
+              >
+                {selectedTrailColor === tc.hex && (
+                  <IconSymbol name="checkmark" size={16} color="#FFFFFF" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+          {/* Preview line */}
+          <View style={styles.trailPreview}>
+            <View style={[styles.trailPreviewDot, { backgroundColor: '#4CAF50' }]} />
+            <View style={[styles.trailPreviewLine, { backgroundColor: selectedTrailColor }]} />
+            <View style={[styles.trailPreviewDot, { backgroundColor: '#F44336' }]} />
+          </View>
+          <ThemedText type="caption" variant="muted" style={{ textAlign: 'center' }}>
+            {TRAIL_COLORS.find((tc) => tc.hex === selectedTrailColor)?.name ?? 'Custom'}
+          </ThemedText>
         </View>
 
         <View style={styles.statsSection}>
@@ -434,6 +504,12 @@ const styles = StyleSheet.create({
   label: {
     marginBottom: Spacing.sm,
   },
+  labelWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
   input: {
     borderWidth: 1,
     borderRadius: BorderRadius.card,
@@ -477,5 +553,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.card,
     marginTop: Spacing.md,
+  },
+  trailColorSection: {
+    marginBottom: Spacing.lg,
+    paddingTop: Spacing.md,
+  },
+  trailColorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  colorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
+    justifyContent: 'center',
+    marginBottom: Spacing.md,
+  },
+  colorSwatch: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trailPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xs,
+    paddingHorizontal: Spacing.xl,
+  },
+  trailPreviewDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  trailPreviewLine: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    marginHorizontal: 4,
   },
 });
