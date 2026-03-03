@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Colors } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { createPost } from '@/services/socialService';
 import { Run } from '@/services/supabase';
@@ -16,12 +16,18 @@ interface PostRunModalProps {
   onPost: () => void;
 }
 
-export default function PostRunModal({ visible, run, onClose, onPost }: PostRunModalProps) {
+export default function PostRunModal({
+  visible,
+  run,
+  onClose,
+  onPost,
+}: PostRunModalProps) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [description, setDescription] = useState('');
   const [posting, setPosting] = useState(false);
 
+  // ── Post to Feed ──────────────────────────────────────────
   const handlePost = async () => {
     if (!run) return;
 
@@ -31,14 +37,14 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
     }
 
     setPosting(true);
-    
+
     const result = await createPost({
       type: 'run',
       title: run.title || `Run on ${new Date(run.run_date).toLocaleDateString()}`,
       content: description.trim(),
       run_id: run.id,
     });
-    
+
     if (result.success) {
       setDescription('');
       onPost();
@@ -63,7 +69,8 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <ThemedView style={styles.modal}>
+        <ThemedView style={[styles.modal, { backgroundColor: colorScheme === 'dark' ? colors.card : '#FFFFFF' }]}>
+          {/* Header */}
           <View style={[styles.header, { backgroundColor: colors.primary }]}>
             <ThemedText style={styles.headerTitle}>Post Your Run</ThemedText>
             <TouchableOpacity onPress={onClose}>
@@ -72,6 +79,7 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
           </View>
 
           <View style={styles.content}>
+            {/* Run summary */}
             <View style={[styles.runSummary, { backgroundColor: colors.primary + '10' }]}>
               <View style={styles.summaryRow}>
                 <ThemedText style={styles.summaryLabel}>Distance:</ThemedText>
@@ -93,14 +101,26 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
               </View>
             </View>
 
+            {/* Info: tiles auto-claimed */}
+            <View style={[styles.infoBox, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '20' }]}>
+              <IconSymbol name="hexagon.fill" size={18} color={colors.primary} />
+              <ThemedText type="caption" variant="muted" style={{ flex: 1 }}>
+                Your territory tiles are automatically updated from your runs. Tap Compete to see your map!
+              </ThemedText>
+            </View>
+
+            {/* Description input */}
             <View style={styles.inputContainer}>
               <ThemedText style={styles.label}>What's on your mind?</ThemedText>
               <TextInput
-                style={[styles.input, {
-                  backgroundColor: colors.background,
-                  borderColor: colors.primary,
-                  color: colors.text,
-                }]}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.primary,
+                    color: colors.text,
+                  },
+                ]}
                 value={description}
                 onChangeText={setDescription}
                 placeholder="Share your running experience..."
@@ -109,17 +129,12 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
                 numberOfLines={4}
                 maxLength={280}
               />
-              <ThemedText style={styles.charCount}>
-                {description.length}/280
-              </ThemedText>
+              <ThemedText style={styles.charCount}>{description.length}/280</ThemedText>
             </View>
 
+            {/* Post to Feed */}
             <TouchableOpacity
-              style={[
-                styles.postButton,
-                { backgroundColor: colors.primary },
-                posting && { opacity: 0.6 },
-              ]}
+              style={[styles.postButton, { backgroundColor: colors.primary }, posting && { opacity: 0.6 }]}
               onPress={handlePost}
               disabled={posting}>
               <ThemedText style={styles.postButtonText}>
@@ -127,12 +142,9 @@ export default function PostRunModal({ visible, run, onClose, onPost }: PostRunM
               </ThemedText>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.skipButton]}
-              onPress={onClose}>
-              <ThemedText style={[styles.skipButtonText, { color: colors.icon }]}>
-                Skip
-              </ThemedText>
+            {/* Skip */}
+            <TouchableOpacity style={styles.skipButton} onPress={onClose}>
+              <ThemedText style={[styles.skipButtonText, { color: colors.icon }]}>Skip</ThemedText>
             </TouchableOpacity>
           </View>
         </ThemedView>
@@ -148,10 +160,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modal: {
-    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   header: {
     flexDirection: 'row',
@@ -171,8 +182,8 @@ const styles = StyleSheet.create({
   },
   runSummary: {
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
+    borderRadius: BorderRadius.card,
+    marginBottom: Spacing.md,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -188,6 +199,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.card,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
   inputContainer: {
     marginBottom: 20,
   },
@@ -198,7 +218,7 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 2,
-    borderRadius: 12,
+    borderRadius: BorderRadius.card,
     padding: 16,
     fontSize: 16,
     minHeight: 100,
@@ -212,7 +232,7 @@ const styles = StyleSheet.create({
   },
   postButton: {
     paddingVertical: 16,
-    borderRadius: 12,
+    borderRadius: BorderRadius.card,
     alignItems: 'center',
     marginBottom: 12,
   },
